@@ -1,0 +1,449 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>スプレッドシート「参照」完全攻略ガイド</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;700&display=swap');
+        body { font-family: 'Noto Sans JP', sans-serif; background-color: #f0f4f8; color: #1e293b; overflow-x: hidden; }
+        
+        /* スプレッドシートのセル再現 */
+        .cell { width: 120px; height: 50px; border: 1px solid #e2e8f0; display: flex; flex-direction: column; align-items: center; justify-content: center; font-size: 0.85rem; transition: all 0.3s ease; position: relative; background-color: white; }
+        .cell-header { background-color: #f1f5f9; font-weight: bold; color: #64748b; font-size: 0.75rem; }
+        
+        /* 選択中セルのスタイル（青色に変更） */
+        .cell-selected { border: 2px solid #1a73e8; z-index: 10; }
+        
+        /* フィルハンドル（青い丸に変更） */
+        .fill-handle {
+            position: absolute;
+            bottom: -6px;
+            right: -6px;
+            width: 12px;
+            height: 12px;
+            background-color: #1a73e8;
+            border: 2px solid white;
+            border-radius: 50%; /* 丸にする */
+            cursor: ns-resize;
+            z-index: 20;
+            display: none;
+            box-shadow: 0 0 0 1px rgba(26, 115, 232, 0.4);
+        }
+        .show-handle .fill-handle { display: block; }
+
+        /* オートフィル中の青い枠線 */
+        .autofill-border {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            border: 2px solid #1a73e8;
+            pointer-events: none;
+            transition: height 0.6s cubic-bezier(0.16, 1, 0.3, 1);
+            z-index: 15;
+            display: none;
+        }
+
+        /* 数式テキスト */
+        .formula-text { font-family: 'Courier New', Courier, monospace; font-weight: bold; color: #1e40af; font-size: 0.75rem; }
+        
+        /* カーソルアニメーション */
+        .fake-cursor {
+            position: absolute;
+            width: 24px;
+            height: 24px;
+            pointer-events: none;
+            z-index: 100;
+            transition: all 0.6s cubic-bezier(0.16, 1, 0.3, 1);
+            opacity: 0;
+        }
+
+        .cell-target-highlight { background-color: #fef9c3; border: 2px dashed #eab308; }
+
+        @keyframes pulse {
+            0% { transform: scale(1); }
+            50% { transform: scale(1.1); }
+            100% { transform: scale(1); }
+        }
+        .pulse { animation: pulse 1.5s infinite; }
+        
+        .mixed-ref-card { transition: all 0.3s ease; }
+        .mixed-ref-card:hover { transform: translateY(-5px); }
+    </style>
+</head>
+<body class="p-4 md:p-8">
+    <div class="max-w-4xl mx-auto space-y-12">
+        
+        <!-- Header -->
+        <header class="text-center space-y-4">
+            <h1 class="text-3xl md:text-5xl font-black text-slate-800 tracking-tight">
+                スプレッドシートの<br class="md:hidden">
+                <span class="text-blue-600 italic">「参照」</span>をマスターする
+            </h1>
+            <p class="text-slate-600 text-lg font-medium">青い丸（フィルハンドル）を引っ張る動きを見てみよう</p>
+        </header>
+
+        <!-- Concept 1: Relative -->
+        <section class="bg-white rounded-3xl shadow-2xl overflow-hidden border border-slate-200">
+            <div class="p-6 bg-blue-600 text-white flex justify-between items-center shadow-lg">
+                <div>
+                    <h2 class="text-2xl font-bold flex items-center mb-1">
+                        <span class="mr-2">🏃♂️</span> 1. 相対参照（いつもの）
+                    </h2>
+                    <p class="text-blue-100 text-sm italic">数式を下に引っ張ると、見る場所も一緒に付いてくる！</p>
+                </div>
+                <div class="hidden md:block text-4xl opacity-20 font-black">RELATIVE</div>
+            </div>
+
+            <div class="p-8 space-y-8">
+                <div class="grid md:grid-cols-2 gap-12 items-start">
+                    <div class="space-y-6">
+                        <div class="bg-blue-50 p-5 rounded-2xl border-l-8 border-blue-500 shadow-sm">
+                            <h3 class="font-bold text-blue-900 text-lg mb-2">「隣を見て」という距離感のコピー</h3>
+                            <p class="text-slate-700 leading-relaxed text-sm">
+                                セルを選択すると、右下に<span class="text-blue-600 font-bold">●（青い丸）</span>が出ます。<br>
+                                これをドラッグして「オートフィル」すると...<br><br>
+                                数式の中身が自動で書き換わり、参照先が A1 → A2 → A3 とズレていきます。
+                            </p>
+                        </div>
+                        <div class="flex flex-col items-center gap-4">
+                            <button id="rel-btn" onclick="toggleRelativeAnimation()" class="w-full bg-blue-600 hover:bg-blue-700 text-white px-8 py-5 rounded-2xl font-black text-xl shadow-xl flex items-center justify-center gap-3 transition-all hover:scale-105">
+                                <span id="rel-btn-icon">🖱️</span> <span id="rel-btn-text">オートフィルを再現する</span>
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <!-- Spreadsheet UI Simulation -->
+                    <div class="relative bg-slate-200 p-4 rounded-xl shadow-inner border border-slate-300">
+                        <div id="fake-cursor" class="fake-cursor">
+                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                <path d="M5.5 3.21V20.8L9.82 16.48L12.75 22.18L15.35 20.83L12.44 15.15H19.06L5.5 3.21Z" fill="black" stroke="white" stroke-width="2"/>
+                            </svg>
+                        </div>
+
+                        <div class="grid grid-cols-3 gap-0.5 bg-slate-300 relative" id="spreadsheet-grid">
+                            <div class="cell cell-header w-12"></div><div class="cell cell-header">A</div><div class="cell cell-header">B</div>
+                            
+                            <div class="cell cell-header w-12 text-slate-400 font-normal">1</div>
+                            <div class="cell font-bold text-slate-500" id="rel-a1">100</div>
+                            <div class="cell cell-selected show-handle" id="rel-b1">
+                                <span class="formula-text">=A1</span>
+                                <div class="fill-handle" id="handle-element"></div>
+                                <div id="autofill-box" class="autofill-border"></div>
+                            </div>
+                            
+                            <div class="cell cell-header w-12 text-slate-400 font-normal">2</div>
+                            <div class="cell font-bold text-slate-500" id="rel-a2">200</div>
+                            <div class="cell" id="rel-b2"></div>
+                            
+                            <div class="cell cell-header w-12 text-slate-400 font-normal">3</div>
+                            <div class="cell font-bold text-slate-500" id="rel-a3">300</div>
+                            <div class="cell" id="rel-b3"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <div id="rel-status" class="bg-slate-50 p-5 rounded-2xl text-center font-bold text-blue-600 border border-blue-100 min-h-[80px] flex items-center justify-center leading-relaxed">
+                    B1セルの「右下の●」を引っ張ってみましょう！
+                </div>
+            </div>
+        </section>
+
+        <!-- Concept 2: Absolute -->
+        <section class="bg-white rounded-3xl shadow-2xl overflow-hidden border border-slate-200">
+            <div class="p-6 bg-red-600 text-white flex justify-between items-center shadow-lg">
+                <div>
+                    <h2 class="text-2xl font-bold flex items-center mb-1">
+                        <span class="mr-2">📍</span> 2. 絶対参照（$を付ける）
+                    </h2>
+                    <p class="text-red-100 text-sm italic">引っ張っても「そこ」を離さない！</p>
+                </div>
+                <div class="hidden md:block text-4xl opacity-20 font-black">ABSOLUTE</div>
+            </div>
+
+            <div class="p-8 space-y-8">
+                <div class="grid md:grid-cols-2 gap-12 items-start">
+                    <div class="space-y-6">
+                        <div class="bg-red-50 p-5 rounded-2xl border-l-8 border-red-500 shadow-sm">
+                            <h3 class="font-bold text-red-900 text-lg mb-2">ドルマークは「画鋲」のしるし</h3>
+                            <p class="text-slate-700 leading-relaxed text-sm">
+                                住所に <strong class="text-red-600 font-black">$</strong> を付けると、青い丸で引っ張っても参照先が動きません。<br><br>
+                                全員の計算に同じセルを使いたいときはこれです。
+                            </p>
+                        </div>
+                        <div class="flex flex-col items-center">
+                            <button id="abs-btn" onclick="toggleAbsoluteAnimation()" class="w-full bg-red-600 hover:bg-red-700 text-white px-8 py-5 rounded-2xl font-black text-xl shadow-xl flex items-center justify-center gap-3 transition-all hover:scale-105">
+                                <span id="abs-btn-icon">📍</span> <span id="abs-btn-text">オートフィルを再現する</span>
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <div class="relative bg-slate-200 p-4 rounded-xl shadow-inner border border-slate-300">
+                        <div id="fake-cursor-abs" class="fake-cursor">
+                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                <path d="M5.5 3.21V20.8L9.82 16.48L12.75 22.18L15.35 20.83L12.44 15.15H19.06L5.5 3.21Z" fill="black" stroke="white" stroke-width="2"/>
+                            </svg>
+                        </div>
+
+                        <div class="grid grid-cols-3 gap-0.5 bg-slate-300 relative" id="spreadsheet-grid-abs">
+                            <div class="cell cell-header w-12"></div><div class="cell cell-header">A</div><div class="cell cell-header">B</div>
+                            <div class="cell cell-header w-12">1</div>
+                            <div class="cell bg-red-50 border-2 border-red-400 font-bold text-red-600" id="abs-target-1">10%</div>
+                            <div class="cell"></div>
+                            <div class="cell cell-header w-12">2</div>
+                            <div class="cell font-bold text-slate-400">100円</div>
+                            <div class="cell cell-selected show-handle" id="abs-b2">
+                                <span class="formula-text">=$A$1</span>
+                                <div class="fill-handle" id="handle-abs"></div>
+                                <div id="autofill-box-abs" class="autofill-border"></div>
+                            </div>
+                            <div class="cell cell-header w-12">3</div>
+                            <div class="cell font-bold text-slate-400">200円</div>
+                            <div class="cell" id="abs-b3"></div>
+                        </div>
+                    </div>
+                </div>
+                <div id="abs-status" class="bg-slate-50 p-5 rounded-2xl text-center font-bold text-red-600 border border-red-100 min-h-[80px] flex items-center justify-center leading-relaxed">
+                    ドルマークがあれば、引っ張っても A1 を見続けます！
+                </div>
+            </div>
+        </section>
+
+        <!-- Concept 3: Advanced Absolute (Mixed) -->
+        <section class="bg-white rounded-3xl shadow-2xl overflow-hidden border border-slate-200">
+            <div class="p-6 bg-indigo-600 text-white flex justify-between items-center shadow-lg">
+                <div>
+                    <h2 class="text-2xl font-bold flex items-center mb-1">
+                        <span class="mr-2">🎓</span> 3. 絶対参照の応用（複合参照）
+                    </h2>
+                    <p class="text-indigo-100 text-sm italic">「行だけ」「列だけ」を固定するプロの技</p>
+                </div>
+                <div class="hidden md:block text-4xl opacity-20 font-black">ADVANCED</div>
+            </div>
+
+            <div class="p-8 space-y-8">
+                <div class="bg-indigo-50 p-6 rounded-2xl border-l-8 border-indigo-500 shadow-sm">
+                    <h3 class="font-bold text-indigo-900 text-lg mb-4 text-center underline italic">ドルマーク（$）の場所で固定される場所が変わる！</h3>
+                    <div class="grid md:grid-cols-3 gap-4">
+                        <div class="mixed-ref-card bg-white p-4 rounded-xl border border-indigo-200 shadow-sm text-center">
+                            <div class="bg-indigo-100 py-1 rounded-lg font-mono font-bold text-indigo-800 mb-2">$A$1</div>
+                            <p class="text-xs font-bold text-slate-600">【完全絶対参照】</p>
+                            <p class="text-xs text-slate-500 mt-1">列も行もガッチリ固定！</p>
+                        </div>
+                        <div class="mixed-ref-card bg-white p-4 rounded-xl border border-indigo-200 shadow-sm text-center">
+                            <div class="bg-blue-50 py-1 rounded-lg font-mono font-bold text-blue-800 mb-2">A$1</div>
+                            <p class="text-xs font-bold text-slate-600">【行固定】</p>
+                            <p class="text-xs text-slate-500 mt-1">行番号（1）の前に$。<br>列はコピーで変わる。</p>
+                        </div>
+                        <div class="mixed-ref-card bg-white p-4 rounded-xl border border-indigo-200 shadow-sm text-center">
+                            <div class="bg-green-50 py-1 rounded-lg font-mono font-bold text-green-800 mb-2">$A1</div>
+                            <p class="text-xs font-bold text-slate-600">【列固定】</p>
+                            <p class="text-xs text-slate-500 mt-1">列文字（A）の前に$。<br>行はコピーで変わる。</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Case Study: Sales Calculation -->
+                <div class="space-y-4">
+                    <h3 class="font-bold text-slate-800 flex items-center">
+                        <span class="bg-indigo-100 text-indigo-600 w-8 h-8 rounded-full flex items-center justify-center mr-2 text-sm">例</span>
+                        税込み売上の計算（税率を絶対参照）
+                    </h3>
+                    <div class="overflow-x-auto bg-slate-100 p-4 rounded-xl">
+                        <table class="w-full border-collapse">
+                            <thead>
+                                <tr>
+                                    <th class="cell cell-header">A(商品)</th>
+                                    <th class="cell cell-header">B(単価)</th>
+                                    <th class="cell cell-header">C(数量)</th>
+                                    <th class="cell cell-header w-48">D(売上式)</th>
+                                    <th class="cell cell-header">E(税率10%)</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr>
+                                    <td class="cell text-xs">商品A</td>
+                                    <td class="cell">1000</td>
+                                    <td class="cell">5</td>
+                                    <td class="cell cell-selected show-handle" id="sales-d2">
+                                        <span class="formula-text">=B2*C2*(1+$E$1)</span>
+                                        <div class="fill-handle" id="handle-sales"></div>
+                                        <div id="autofill-box-sales" class="autofill-border"></div>
+                                    </td>
+                                    <td class="cell bg-red-50 border-2 border-red-400 font-bold text-red-600 text-xs">0.1 (E1)</td>
+                                </tr>
+                                <tr>
+                                    <td class="cell text-xs">商品B</td>
+                                    <td class="cell">1500</td>
+                                    <td class="cell">3</td>
+                                    <td class="cell" id="sales-d3"></td>
+                                    <td class="cell text-slate-300">...</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                    
+                    <div class="flex flex-col md:flex-row gap-4 items-center justify-center mt-6">
+                        <button id="sales-btn" onclick="toggleSalesAnimation()" class="bg-indigo-600 hover:bg-indigo-700 text-white px-8 py-4 rounded-2xl font-black text-lg shadow-xl flex items-center gap-2 transition-all hover:scale-105">
+                            <span id="sales-btn-icon">💰</span> <span id="sales-btn-text">売上計算をオートフィル</span>
+                        </button>
+                    </div>
+                    
+                    <div id="sales-status" class="bg-slate-50 p-4 rounded-xl text-center text-sm font-bold text-indigo-700 border border-indigo-100 min-h-[60px] flex items-center justify-center">
+                        商品Aの売上式（D2）をコピーして、商品Bも正しく計算できるかな？
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Shortcut Tip -->
+        <footer class="text-center pb-12">
+            <div class="inline-block bg-slate-800 text-white px-8 py-6 rounded-3xl shadow-2xl transform rotate-1 border-4 border-yellow-400">
+                <p class="text-yellow-400 font-black text-2xl mb-2 italic">SUPER TIP</p>
+                <p class="text-lg">数式を書いてる途中で <kbd class="bg-slate-600 px-3 py-1 rounded-lg border-b-4 border-slate-900 mx-1 text-white font-mono">F4</kbd> キー！</p>
+                <p class="text-slate-400 text-sm mt-3 font-bold">一瞬で「相対 → 絶対 → 行固定 → 列固定」と切り替わります。</p>
+            </div>
+        </footer>
+    </div>
+
+    <script>
+        let isRelAnimating = false;
+        let isRelFinished = false;
+        let isAbsAnimating = false;
+        let isAbsFinished = false;
+        let isSalesAnimating = false;
+        let isSalesFinished = false;
+
+        async function toggleRelativeAnimation() {
+            if (isRelAnimating) return;
+            const btnText = document.getElementById('rel-btn-text');
+            const btnIcon = document.getElementById('rel-btn-icon');
+            const status = document.getElementById('rel-status');
+            const cursor = document.getElementById('fake-cursor');
+            const handle = document.getElementById('handle-element');
+            const box = document.getElementById('autofill-box');
+            const b1 = document.getElementById('rel-b1');
+            const b2 = document.getElementById('rel-b2');
+            const b3 = document.getElementById('rel-b3');
+            const a2 = document.getElementById('rel-a2');
+            const a3 = document.getElementById('rel-a3');
+
+            if (isRelFinished) {
+                b2.innerHTML = ''; b3.innerHTML = '';
+                b1.classList.add('show-handle');
+                b2.classList.remove('cell-selected'); b3.classList.remove('cell-selected');
+                a2.classList.remove('cell-target-highlight'); a3.classList.remove('cell-target-highlight');
+                box.style.display = 'none'; box.style.height = '100%';
+                btnText.innerText = "オートフィルを再現する"; btnIcon.innerText = "🖱️";
+                status.innerText = "リセットしました。";
+                isRelFinished = false;
+                return;
+            }
+
+            isRelAnimating = true;
+            status.innerText = "青い丸（フィルハンドル）にマウスを合わせます...";
+            const handleRect = handle.getBoundingClientRect();
+            const gridRect = document.getElementById('spreadsheet-grid').getBoundingClientRect();
+            cursor.style.opacity = '1';
+            cursor.style.left = (handleRect.left - gridRect.left + 5) + 'px';
+            cursor.style.top = (handleRect.top - gridRect.top + 5) + 'px';
+            await wait(800);
+            status.innerText = "クリックして下にドラッグ！";
+            box.style.display = 'block';
+            await wait(100);
+            box.style.height = '300%'; 
+            cursor.style.top = (handleRect.top - gridRect.top + 105) + 'px';
+            await wait(700);
+            cursor.style.opacity = '0';
+            box.style.display = 'none';
+            b2.innerHTML = '<span class="formula-text">=A2</span>'; b2.classList.add('cell-selected');
+            b3.innerHTML = '<span class="formula-text">=A3</span>'; b3.classList.add('cell-selected');
+            a2.classList.add('cell-target-highlight'); a3.classList.add('cell-target-highlight');
+            status.innerHTML = "参照が自動で <span class='text-blue-800 underline'>=A2, =A3</span> に変化しました！";
+            btnText.innerText = "リセットする"; btnIcon.innerText = "🔄";
+            isRelAnimating = false; isRelFinished = true;
+        }
+
+        async function toggleAbsoluteAnimation() {
+            if (isAbsAnimating) return;
+            const btnText = document.getElementById('abs-btn-text');
+            const btnIcon = document.getElementById('abs-btn-icon');
+            const status = document.getElementById('abs-status');
+            const cursor = document.getElementById('fake-cursor-abs');
+            const box = document.getElementById('autofill-box-abs');
+            const target = document.getElementById('abs-target-1');
+            const handle = document.getElementById('handle-abs');
+            const b3 = document.getElementById('abs-b3');
+
+            if (isAbsFinished) {
+                b3.innerHTML = ''; b3.classList.remove('cell-selected');
+                target.classList.remove('pulse', 'ring-4', 'ring-red-400');
+                box.style.display = 'none'; box.style.height = '100%';
+                btnText.innerText = "オートフィルを再現する"; btnIcon.innerText = "📍";
+                status.innerText = "リセットしました。";
+                isAbsFinished = false;
+                return;
+            }
+
+            isAbsAnimating = true;
+            status.innerText = "絶対参照のセルを下に引っ張ります...";
+            const handleRect = handle.getBoundingClientRect();
+            const gridRect = document.getElementById('spreadsheet-grid-abs').getBoundingClientRect();
+            cursor.style.opacity = '1';
+            cursor.style.left = (handleRect.left - gridRect.left + 5) + 'px';
+            cursor.style.top = (handleRect.top - gridRect.top + 5) + 'px';
+            await wait(800);
+            box.style.display = 'block';
+            box.style.height = '200%'; 
+            cursor.style.top = (handleRect.top - gridRect.top + 55) + 'px';
+            await wait(700);
+            cursor.style.opacity = '0';
+            box.style.display = 'none';
+            b3.innerHTML = '<span class="formula-text">=$A$1</span>'; b3.classList.add('cell-selected');
+            target.classList.add('pulse', 'ring-4', 'ring-red-400', 'ring-offset-2');
+            status.innerHTML = "ドルマークのおかげで、場所は <span class='text-red-800 underline'>=$A$1</span> のままです！";
+            btnText.innerText = "リセットする"; btnIcon.innerText = "🔄";
+            isAbsAnimating = false; isAbsFinished = true;
+        }
+
+        async function toggleSalesAnimation() {
+            if (isSalesAnimating) return;
+            const btnText = document.getElementById('sales-btn-text');
+            const status = document.getElementById('sales-status');
+            const d3 = document.getElementById('sales-d3');
+            const box = document.getElementById('autofill-box-sales');
+
+            if (isSalesFinished) {
+                d3.innerHTML = ''; d3.classList.remove('cell-selected');
+                box.style.display = 'none'; box.style.height = '100%';
+                btnText.innerText = "売上計算をオートフィル";
+                status.innerText = "リセットしました。";
+                isSalesFinished = false;
+                return;
+            }
+
+            isSalesAnimating = true;
+            status.innerText = "商品Aの数式をコピー中...";
+            box.style.display = 'block';
+            box.style.height = '200%';
+            await wait(1000);
+            
+            box.style.display = 'none';
+            d3.innerHTML = '<span class="formula-text">=B3*C3*(1+$E$1)</span>';
+            d3.classList.add('cell-selected');
+            
+            status.innerHTML = "商品Bの式が <span class='text-indigo-800 underline'>=B3*C3*(1+$E$1)</span> になりました！<br>単価(B)と数量(C)はズレても、税率(E1)だけはしっかり固定されています。";
+            btnText.innerText = "リセットする";
+            isSalesAnimating = false;
+            isSalesFinished = true;
+        }
+
+        function wait(ms) {
+            return new Promise(resolve => setTimeout(resolve, ms));
+        }
+    </script>
+</body>
+</html>
